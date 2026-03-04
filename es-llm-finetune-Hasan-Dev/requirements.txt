@@ -1,0 +1,17 @@
+# ── Core ──────────────────────────────────────
+torch>=2.1.0
+transformers>=4.37.0
+datasets>=2.14.0
+accelerate>=0.25.0
+pyyaml>=6.0
+
+# ── Optional: CMA-ES ─────────────────────────
+cmaes>=0.10.0
+
+# ── Evaluation / UI (optional) ───────────────
+streamlit>=1.30.0
+pandas>=2.0.0
+
+# ── Dev / Testing ────────────────────────────
+# pytest>=7.0
+# ruff>=0.1.0

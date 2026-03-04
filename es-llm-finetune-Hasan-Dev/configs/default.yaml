@@ -1,0 +1,86 @@
+# ──────────────────────────────────────────────
+#  Default config for ES layer-wise fine-tuning
+# ──────────────────────────────────────────────
+
+model:
+  name: "Qwen/Qwen2.5-0.5B-Instruct"
+  revision: "main"
+  dtype: "float16"         # float16 / bfloat16 / float32
+  device: "cuda"           # cpu / cuda / cuda:0
+
+# ── Layer Selection ──────────────────────────
+# Which layers/sub-modules to perturb.
+# Use 'inspect_layers.py' to see all available names.
+layer_selection:
+  # Strategy: "by_name", "by_index", "by_regex"
+  strategy: "by_index"
+
+  # For "by_index": list of decoder-layer indices (0-based, Qwen2.5-0.5B has 24 layers)
+  layer_indices: [23]
+
+  # For "by_name": exact parameter names (dot-separated)
+  # layer_names:
+  #   - "model.layers.23.self_attn.q_proj.weight"
+  #   - "model.layers.23.mlp.gate_proj.weight"
+
+  # For "by_regex": regex pattern matched against parameter names
+  # layer_regex: "model\\.layers\\.2[23]\\..*"
+
+  # Which sub-components within each selected layer to perturb
+  # Options: "all", "attention", "mlp", "layernorm", "attention_qkv", "attention_o"
+  components: "all"
+
+# ── Evolutionary Strategy ────────────────────
+es:
+  algorithm: "openai_es"   # "openai_es" | "cma_es"
+
+  # Population size (number of perturbations per generation)
+  population_size: 20
+
+  # Noise standard deviation
+  sigma: 0.01
+
+  # Learning rate
+  learning_rate: 0.001
+
+  # Number of generations
+  num_generations: 50
+
+  # Seed for reproducibility
+  seed: 42
+
+  # Use antithetic sampling (mirrored noise) — halves variance
+  antithetic: true
+
+  # Fitness shaping: "centered_rank" | "raw" | "normalized"
+  fitness_shaping: "centered_rank"
+
+  # Weight decay (L2 regularization on perturbation magnitude)
+  weight_decay: 0.0
+
+  # Optional: Low-rank perturbation (reduces memory for large layers)
+  low_rank:
+    enabled: false
+    rank: 16               # rank of the perturbation matrix
+
+# ── Fitness / Evaluation ─────────────────────
+fitness:
+  task: "gsm8k"            # "gsm8k" | "custom"
+  split: "train"           # evaluate on train split for fitness
+  num_samples: 50          # number of samples per fitness evaluation
+  max_new_tokens: 256
+  batch_size: 1            # batch size for generation
+
+# ── Logging & Checkpoints ────────────────────
+output:
+  dir: "experiments/runs"
+  run_name: null            # auto-generated if null
+  save_every: 10            # save checkpoint every N generations
+  log_every: 1              # log metrics every N generations
+
+# ── Evaluation (post-training) ───────────────
+eval:
+  task: "gsm8k"
+  split: "test"
+  num_samples: 200
+  max_new_tokens: 256

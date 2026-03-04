@@ -1,0 +1,37 @@
+# ──────────────────────────────────────────────
+#  Experiment: ES fine-tune multiple decoder layers on GSM8K
+# ──────────────────────────────────────────────
+
+model:
+  name: "Qwen/Qwen2.5-0.5B-Instruct"
+  dtype: "float16"
+  device: "cuda"
+
+layer_selection:
+  strategy: "by_index"
+  layer_indices: [20, 21, 22, 23]   # last 4 layers
+  components: "mlp"                   # only MLP sub-components
+
+es:
+  algorithm: "openai_es"
+  population_size: 40
+  sigma: 0.005
+  learning_rate: 0.0005
+  num_generations: 200
+  seed: 42
+  antithetic: true
+  fitness_shaping: "centered_rank"
+  low_rank:
+    enabled: true
+    rank: 8
+
+fitness:
+  task: "gsm8k"
+  split: "train"
+  num_samples: 50
+  max_new_tokens: 256
+
+output:
+  dir: "experiments/runs"
+  run_name: "gsm8k_multilayer_mlp_es"
+  save_every: 50

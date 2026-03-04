@@ -1,0 +1,34 @@
+# ──────────────────────────────────────────────
+#  Experiment: ES fine-tune last decoder layer on GSM8K
+# ──────────────────────────────────────────────
+
+model:
+  name: "Qwen/Qwen2.5-0.5B-Instruct"
+  dtype: "float16"
+  device: "cuda"
+
+layer_selection:
+  strategy: "by_index"
+  layer_indices: [23]        # last decoder layer
+  components: "all"
+
+es:
+  algorithm: "openai_es"
+  population_size: 20
+  sigma: 0.01
+  learning_rate: 0.001
+  num_generations: 100
+  seed: 42
+  antithetic: true
+  fitness_shaping: "centered_rank"
+
+fitness:
+  task: "gsm8k"
+  split: "train"
+  num_samples: 30
+  max_new_tokens: 256
+
+output:
+  dir: "experiments/runs"
+  run_name: "gsm8k_last_layer_es"
+  save_every: 25
