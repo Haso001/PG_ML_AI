@@ -88,28 +88,39 @@ class OpenAIES(BaseES):
         self.fitness_shaping = fitness_shaping
         self.weight_decay = weight_decay
 
-        self._generator = torch.Generator()
-        self._generator.manual_seed(seed)
+        self._seed = seed
+        self._generator: torch.Generator | None = None
+        self._generator_device: str = ""
 
         # Store noise vectors between ask()/tell() so we don't have to re-generate
         self._noise_cache: list[torch.Tensor] = []
+
+    def _get_generator(self, device: torch.device | str) -> torch.Generator:
+        """Return a seeded generator on the correct device (lazy init)."""
+        dev_str = str(device)
+        if self._generator is None or self._generator_device != dev_str:
+            self._generator = torch.Generator(device=device)
+            self._generator.manual_seed(self._seed)
+            self._generator_device = dev_str
+        return self._generator
 
     # ── ask ────────────────────────────────────────────────────────
     def ask(self, current_params: torch.Tensor) -> list[torch.Tensor]:
         dim = current_params.numel()
         device = current_params.device
+        gen = self._get_generator(device)
 
         if self.antithetic:
             n_pairs = self.population_size // 2
             noises = antithetic_pairs(
-                dim, n_pairs, sigma=self.sigma, generator=self._generator, device=device
+                dim, n_pairs, sigma=self.sigma, generator=gen, device=device
             )
             # If population_size is odd, add one extra
             if self.population_size % 2 == 1:
-                noises.append(gaussian_noise(dim, sigma=self.sigma, generator=self._generator, device=device))
+                noises.append(gaussian_noise(dim, sigma=self.sigma, generator=gen, device=device))
         else:
             noises = [
-                gaussian_noise(dim, sigma=self.sigma, generator=self._generator, device=device)
+                gaussian_noise(dim, sigma=self.sigma, generator=gen, device=device)
                 for _ in range(self.population_size)
             ]
 

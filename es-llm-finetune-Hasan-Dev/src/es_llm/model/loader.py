@@ -15,7 +15,7 @@ def load_model_and_tokenizer(
     model_name: str,
     revision: str = "main",
     dtype: str = "float32",
-    device: str = "cpu",
+    device: str = "cuda",
     model_path: Optional[str] = None,
 ):
     """Load a HuggingFace causal-LM model and its tokenizer.

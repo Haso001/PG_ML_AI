@@ -26,7 +26,7 @@ def main():
     ap = argparse.ArgumentParser(description="Inspect model layers")
     ap.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct")
     ap.add_argument("--dtype", default="float32")
-    ap.add_argument("--device", default="cpu")
+    ap.add_argument("--device", default="cuda")
     ap.add_argument("--filter", default=None, help="Regex to filter parameter names")
     ap.add_argument("--top", type=int, default=None, help="Show top N largest parameters")
     ap.add_argument("--summary", action="store_true", help="Only print per-layer summary")

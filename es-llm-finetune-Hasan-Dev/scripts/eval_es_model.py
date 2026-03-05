@@ -32,7 +32,7 @@ def main():
     ap.add_argument("--split", default="test", choices=["train", "test"])
     ap.add_argument("--num_samples", type=int, default=200)
     ap.add_argument("--max_new_tokens", type=int, default=256)
-    ap.add_argument("--device", default="cpu")
+    ap.add_argument("--device", default="cuda")
     ap.add_argument("--dtype", default="float32")
     args = ap.parse_args()
 

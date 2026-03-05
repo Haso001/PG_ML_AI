@@ -107,8 +107,8 @@ def train(cfg: dict) -> Path:
     model, tokenizer = load_model_and_tokenizer(
         model_name=model_cfg["name"],
         revision=model_cfg.get("revision", "main"),
-        dtype=model_cfg.get("dtype", "float32"),
-        device=model_cfg.get("device", "cpu"),
+        dtype=model_cfg.get("dtype", "float16"),
+        device=model_cfg.get("device", "cuda"),
     )
 
     # ── 2) Select layers ─────────────────────────────────────────
@@ -148,7 +148,7 @@ def train(cfg: dict) -> Path:
     log_every = cfg["output"].get("log_every", 1)
 
     num_generations = es_cfg["num_generations"]
-    device = model_cfg.get("device", "cpu")
+    device = model_cfg.get("device", "cuda")
     is_cuda = device.startswith("cuda")
 
     if is_cuda:

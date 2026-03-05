@@ -9,9 +9,9 @@ def gaussian_noise(
     shape: int | tuple[int, ...],
     sigma: float = 1.0,
     generator: torch.Generator | None = None,
-    device: str = "cpu",
+    device: str = "cuda",
 ) -> torch.Tensor:
-    """Sample Gaussian noise N(0, σ²I)."""
+    """Sample Gaussian noise N(0, σ²I) directly on *device*."""
     if isinstance(shape, int):
         shape = (shape,)
     return torch.randn(*shape, generator=generator, device=device) * sigma
@@ -22,7 +22,7 @@ def antithetic_pairs(
     n_pairs: int,
     sigma: float = 1.0,
     generator: torch.Generator | None = None,
-    device: str = "cpu",
+    device: str = "cuda",
 ) -> list[torch.Tensor]:
     """Generate *n_pairs* mirrored (antithetic) noise pairs → 2*n_pairs vectors.
 
@@ -42,7 +42,7 @@ def low_rank_noise(
     rank: int,
     sigma: float = 1.0,
     generator: torch.Generator | None = None,
-    device: str = "cpu",
+    device: str = "cuda",
 ) -> torch.Tensor:
     """Generate a low-rank perturbation matrix A·B^T of shape (rows, cols).
 
