@@ -13,6 +13,7 @@ from typing import Optional
 import torch
 from datasets import load_dataset
 from torch import nn
+from tqdm.auto import tqdm
 from transformers import PreTrainedTokenizerBase
 
 from .base import BaseFitness
@@ -103,7 +104,7 @@ class GSM8KFitness(BaseFitness):
         model.eval()
         correct = 0
 
-        for ex in self._dataset:
+        for ex in tqdm(self._dataset, desc="    GSM8K Eval", unit="q", leave=False):
             question = ex["question"]
             gold = normalize_answer(extract_hash_answer(ex["answer"]))
 

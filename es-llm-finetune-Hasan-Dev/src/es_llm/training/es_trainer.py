@@ -18,6 +18,8 @@ from typing import Optional
 
 import torch
 
+from tqdm.auto import tqdm
+
 from ..es.base import BaseES
 from ..es.openai_es import OpenAIES
 from ..es.cma_es import CMA_ES
@@ -167,7 +169,7 @@ def train(cfg: dict) -> Path:
         es_cfg.get("learning_rate", 0.001),
     )
 
-    for gen in range(1, num_generations + 1):
+    for gen in tqdm(range(1, num_generations + 1), desc="Generationen", unit="gen"):
         t0 = time.time()
 
         # Ask: generate candidates
@@ -175,10 +177,13 @@ def train(cfg: dict) -> Path:
 
         # Evaluate each candidate
         fitnesses = []
-        for i, cand in enumerate(candidates):
+        cand_bar = tqdm(enumerate(candidates), total=len(candidates),
+                        desc=f"  Gen {gen:3d} Kandidaten", unit="cand", leave=False)
+        for i, cand in cand_bar:
             selector.set_flat_params(cand)
             fit = fitness.evaluate(model, tokenizer)
             fitnesses.append(fit)
+            cand_bar.set_postfix(fit=f"{fit:.3f}")
             # Free intermediate GPU cache between candidates
             if is_cuda:
                 torch.cuda.empty_cache()
