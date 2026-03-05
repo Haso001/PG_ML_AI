@@ -25,6 +25,7 @@ from ..es.openai_es import OpenAIES
 from ..es.cma_es import CMA_ES
 from ..fitness.base import BaseFitness
 from ..fitness.gsm8k import GSM8KFitness
+from ..fitness.gsm8k_loglikelihood import GSM8KLogLikelihoodFitness
 from ..model.layer_selector import LayerSelector
 from ..model.loader import load_model_and_tokenizer
 from ..utils.logging import log_generation, save_run_log, setup_logger
@@ -67,6 +68,13 @@ def _build_fitness(cfg: dict) -> BaseFitness:
             num_samples=fit_cfg.get("num_samples", 50),
             split=fit_cfg.get("split", "train"),
             max_new_tokens=fit_cfg.get("max_new_tokens", 256),
+            seed=cfg["es"].get("seed", 42),
+        )
+    elif task == "gsm8k_loglikelihood":
+        return GSM8KLogLikelihoodFitness(
+            num_samples=fit_cfg.get("num_samples", 50),
+            split=fit_cfg.get("split", "train"),
+            target_mode=fit_cfg.get("target_mode", "short"),
             seed=cfg["es"].get("seed", 42),
         )
     else:
@@ -174,6 +182,7 @@ def train(cfg: dict) -> Path:
 
         # Ask: generate candidates
         candidates = es.ask(current_params)
+        print(f"\n── Generation {gen}/{num_generations} ──", flush=True)
 
         # Evaluate each candidate
         fitnesses = []
@@ -184,6 +193,7 @@ def train(cfg: dict) -> Path:
             fit = fitness.evaluate(model, tokenizer)
             fitnesses.append(fit)
             cand_bar.set_postfix(fit=f"{fit:.3f}")
+            print(f"  Kandidat {i+1}/{len(candidates)} → fitness={fit:.3f}", flush=True)
             # Free intermediate GPU cache between candidates
             if is_cuda:
                 torch.cuda.empty_cache()

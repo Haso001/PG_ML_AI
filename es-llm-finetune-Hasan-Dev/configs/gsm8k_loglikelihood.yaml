@@ -1,0 +1,38 @@
+# ──────────────────────────────────────────────
+#  Log-Likelihood Run: gleiche Settings wie erster Run
+#  aber mit stetiger Fitness → ~10× schneller
+#  Erwartete Laufzeit: ~10-15 Min. auf T4
+# ──────────────────────────────────────────────
+
+model:
+  name: "Qwen/Qwen2.5-0.5B-Instruct"
+  dtype: "float16"
+  device: "cuda"
+
+layer_selection:
+  strategy: "by_index"
+  layer_indices: [23]          # gleicher Layer wie erster Run
+  components: "all"            # alle ~14.9M Parameter
+
+es:
+  algorithm: "openai_es"
+  population_size: 10          # gleich wie erster Run
+  sigma: 0.001
+  learning_rate: 0.001
+  num_generations: 10          # gleich wie erster Run
+  seed: 42
+  antithetic: true
+  fitness_shaping: "centered_rank"
+  weight_decay: 0.0
+
+fitness:
+  task: "gsm8k_loglikelihood"  # ← NEU: Log-Likelihood statt Accuracy
+  split: "train"
+  num_samples: 30              # gleich wie erster Run
+  target_mode: "short"         # nur "#### <number>" bewerten
+
+output:
+  dir: "experiments/runs"
+  run_name: "gsm8k_loglikelihood_compare"
+  save_every: 5
+  log_every: 1
