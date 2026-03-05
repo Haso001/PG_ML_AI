@@ -1,0 +1,38 @@
+# ──────────────────────────────────────────────
+#  Fast smoke-test: ~30-60 min on a single GPU
+#  θ ≈ 14.9M params (full last layer, all components)
+#  Total inferences: 10 × 10 × 15 = 1.500
+# ──────────────────────────────────────────────
+
+model:
+  name: "Qwen/Qwen2.5-0.5B-Instruct"
+  dtype: "float16"
+  device: "cuda"
+
+layer_selection:
+  strategy: "by_index"
+  layer_indices: [23]
+  components: "all"            # alle ~14.9M Parameter des letzten Layers
+
+es:
+  algorithm: "openai_es"
+  population_size: 10          # 5 antithetic Paare
+  sigma: 0.001                 # klein weil 14.9M Dimensionen
+  learning_rate: 0.001         # konservativ bei hoher Dimension
+  num_generations: 10
+  seed: 42
+  antithetic: true
+  fitness_shaping: "centered_rank"
+  weight_decay: 0.0
+
+fitness:
+  task: "gsm8k"
+  split: "train"
+  num_samples: 15              # Minimum für halbwegs stabiles Signal
+  max_new_tokens: 128          # kürzer → schneller
+
+output:
+  dir: "experiments/runs"
+  run_name: "gsm8k_full_layer_fast"
+  save_every: 5
+  log_every: 1
