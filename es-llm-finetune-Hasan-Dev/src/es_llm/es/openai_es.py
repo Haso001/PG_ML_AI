@@ -189,31 +189,36 @@ class OpenAIES(BaseES):
         else:
             shaped = np.array(fitnesses, dtype=np.float64)
 
-        # Weighted combination of noise vectors
+        # Weighted combination of noise vectors (always in float32 to prevent overflow)
         #   grad_est = (1 / Nσ) Σ shaped_i · ε_i
         n = len(self._noise_cache)
-        grad = torch.zeros_like(current_params)
+        device = current_params.device
+        grad = torch.zeros(current_params.shape, dtype=torch.float32, device=device)
+        params_f32 = current_params.float()
         for i, eps in enumerate(self._noise_cache):
-            grad += float(shaped[i]) * eps
+            grad += float(shaped[i]) * eps.float()
         grad /= n * self._cached_sigma
 
         # Weight decay
         if self.weight_decay > 0:
-            grad -= self.weight_decay * current_params
+            grad -= self.weight_decay * params_f32
 
-        # Parameter update (SGD or Adam)
+        # Parameter update (SGD or Adam) – all in float32
         if self.optimizer_type == "adam":
             self._adam_t += 1
             if self._adam_m is None:
-                self._adam_m = torch.zeros_like(grad)
-                self._adam_v = torch.zeros_like(grad)
+                self._adam_m = torch.zeros_like(grad)  # float32
+                self._adam_v = torch.zeros_like(grad)  # float32
             self._adam_m = self.adam_beta1 * self._adam_m + (1 - self.adam_beta1) * grad
             self._adam_v = self.adam_beta2 * self._adam_v + (1 - self.adam_beta2) * grad ** 2
             m_hat = self._adam_m / (1 - self.adam_beta1 ** self._adam_t)
             v_hat = self._adam_v / (1 - self.adam_beta2 ** self._adam_t)
-            new_params = current_params + self.lr * m_hat / (torch.sqrt(v_hat) + self.adam_epsilon)
+            new_params = params_f32 + self.lr * m_hat / (torch.sqrt(v_hat) + self.adam_epsilon)
         else:
-            new_params = current_params + self.lr * grad
+            new_params = params_f32 + self.lr * grad
+
+        # Cast back to original dtype
+        new_params = new_params.to(current_params.dtype)
 
         self._generation += 1
 

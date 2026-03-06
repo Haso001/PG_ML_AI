@@ -28,7 +28,7 @@ es:
   algorithm: "openai_es"
   population_size: 64              # 32 antithetic Paare → stabiler Gradient
   sigma: 0.005                     # Startwert (höher bei weniger Params)
-  learning_rate: 0.01              # Höher dank Adam
+  learning_rate: 0.002              # Konservativ mit Adam (float16-safe)
   num_generations: 100
   seed: 42
   antithetic: true
