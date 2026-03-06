@@ -47,6 +47,13 @@ def _build_es(cfg: dict) -> BaseES:
             fitness_shaping=es_cfg.get("fitness_shaping", "centered_rank"),
             weight_decay=es_cfg.get("weight_decay", 0.0),
             seed=es_cfg.get("seed", 42),
+            optimizer=es_cfg.get("optimizer", "sgd"),
+            adam_beta1=es_cfg.get("adam_beta1", 0.9),
+            adam_beta2=es_cfg.get("adam_beta2", 0.999),
+            adam_epsilon=es_cfg.get("adam_epsilon", 1e-8),
+            sigma_decay=es_cfg.get("sigma_decay", "constant"),
+            sigma_final=es_cfg.get("sigma_final"),
+            max_generations=es_cfg.get("num_generations"),
         )
     elif algo == "cma_es":
         return CMA_ES(
@@ -76,6 +83,7 @@ def _build_fitness(cfg: dict) -> BaseFitness:
             split=fit_cfg.get("split", "train"),
             target_mode=fit_cfg.get("target_mode", "short"),
             seed=cfg["es"].get("seed", 42),
+            batch_size=fit_cfg.get("batch_size", 1),
         )
     else:
         raise ValueError(f"Unknown fitness task: {task}")

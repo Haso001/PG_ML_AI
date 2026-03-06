@@ -15,6 +15,7 @@ Fitness shaping (centered rank) improves robustness to outliers.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Optional
 
 import numpy as np
@@ -80,6 +81,13 @@ class OpenAIES(BaseES):
         fitness_shaping: str = "centered_rank",
         weight_decay: float = 0.0,
         seed: int = 42,
+        optimizer: str = "sgd",
+        adam_beta1: float = 0.9,
+        adam_beta2: float = 0.999,
+        adam_epsilon: float = 1e-8,
+        sigma_decay: str = "constant",
+        sigma_final: float | None = None,
+        max_generations: int | None = None,
     ):
         self.population_size = population_size
         self.sigma = sigma
@@ -95,6 +103,38 @@ class OpenAIES(BaseES):
         # Store noise vectors between ask()/tell() so we don't have to re-generate
         self._noise_cache: list[torch.Tensor] = []
 
+        # Adam optimizer state (Salimans et al., 2017 – practical improvement)
+        self.optimizer_type = optimizer
+        self.adam_beta1 = adam_beta1
+        self.adam_beta2 = adam_beta2
+        self.adam_epsilon = adam_epsilon
+        self._adam_m: torch.Tensor | None = None
+        self._adam_v: torch.Tensor | None = None
+        self._adam_t: int = 0
+
+        # Sigma schedule (exploration → exploitation)
+        self.sigma_decay = sigma_decay
+        self.sigma_final = sigma_final if sigma_final is not None else sigma
+        self.max_generations = max_generations
+        self._generation: int = 0
+        self._cached_sigma: float = sigma
+
+    def _get_sigma(self) -> float:
+        """Return current sigma, potentially decayed over generations."""
+        if self.sigma_decay == "constant" or self.max_generations is None or self.max_generations <= 0:
+            return self.sigma
+        progress = min(self._generation / self.max_generations, 1.0)
+        if self.sigma_decay == "cosine":
+            return self.sigma_final + 0.5 * (self.sigma - self.sigma_final) * (1 + math.cos(math.pi * progress))
+        elif self.sigma_decay == "linear":
+            return self.sigma + (self.sigma_final - self.sigma) * progress
+        return self.sigma
+
+    @property
+    def current_sigma(self) -> float:
+        """Current noise standard deviation (accounts for schedule)."""
+        return self._get_sigma()
+
     def _get_generator(self, device: torch.device | str) -> torch.Generator:
         """Return a seeded generator on the correct device (lazy init)."""
         dev_str = str(device)
@@ -109,18 +149,20 @@ class OpenAIES(BaseES):
         dim = current_params.numel()
         device = current_params.device
         gen = self._get_generator(device)
+        sigma = self._get_sigma()
+        self._cached_sigma = sigma
 
         if self.antithetic:
             n_pairs = self.population_size // 2
             noises = antithetic_pairs(
-                dim, n_pairs, sigma=self.sigma, generator=gen, device=device
+                dim, n_pairs, sigma=sigma, generator=gen, device=device
             )
             # If population_size is odd, add one extra
             if self.population_size % 2 == 1:
-                noises.append(gaussian_noise(dim, sigma=self.sigma, generator=gen, device=device))
+                noises.append(gaussian_noise(dim, sigma=sigma, generator=gen, device=device))
         else:
             noises = [
-                gaussian_noise(dim, sigma=self.sigma, generator=gen, device=device)
+                gaussian_noise(dim, sigma=sigma, generator=gen, device=device)
                 for _ in range(self.population_size)
             ]
 
@@ -153,13 +195,27 @@ class OpenAIES(BaseES):
         grad = torch.zeros_like(current_params)
         for i, eps in enumerate(self._noise_cache):
             grad += float(shaped[i]) * eps
-        grad /= n * self.sigma
+        grad /= n * self._cached_sigma
 
         # Weight decay
         if self.weight_decay > 0:
             grad -= self.weight_decay * current_params
 
-        new_params = current_params + self.lr * grad
+        # Parameter update (SGD or Adam)
+        if self.optimizer_type == "adam":
+            self._adam_t += 1
+            if self._adam_m is None:
+                self._adam_m = torch.zeros_like(grad)
+                self._adam_v = torch.zeros_like(grad)
+            self._adam_m = self.adam_beta1 * self._adam_m + (1 - self.adam_beta1) * grad
+            self._adam_v = self.adam_beta2 * self._adam_v + (1 - self.adam_beta2) * grad ** 2
+            m_hat = self._adam_m / (1 - self.adam_beta1 ** self._adam_t)
+            v_hat = self._adam_v / (1 - self.adam_beta2 ** self._adam_t)
+            new_params = current_params + self.lr * m_hat / (torch.sqrt(v_hat) + self.adam_epsilon)
+        else:
+            new_params = current_params + self.lr * grad
+
+        self._generation += 1
 
         # Stats
         best_idx = int(np.argmax(fitnesses))

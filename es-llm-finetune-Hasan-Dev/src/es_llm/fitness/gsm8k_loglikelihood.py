@@ -73,12 +73,15 @@ class GSM8KLogLikelihoodFitness(BaseFitness):
         split: str = "train",
         target_mode: str = "short",
         seed: int = 42,
+        batch_size: int = 1,
     ):
         self.num_samples = num_samples
         self.split = split
         self.target_mode = target_mode
         self.seed = seed
+        self.batch_size = batch_size
         self._dataset = None
+        self._cached_inputs: list[dict] | None = None
 
     def _load_data(self):
         if self._dataset is not None:
@@ -92,22 +95,16 @@ class GSM8KLogLikelihoodFitness(BaseFitness):
     def name(self) -> str:
         return f"gsm8k_ll_{self.split}_{self.num_samples}"
 
-    @torch.inference_mode()
-    def evaluate(self, model: nn.Module, tokenizer: PreTrainedTokenizerBase) -> float:
-        """Compute mean log-likelihood of gold answers. Higher = better."""
-        self._load_data()
-        model.eval()
-        total_ll = 0.0
-
-        for ex in tqdm(self._dataset, desc="    GSM8K LL", unit="q", leave=False):
+    def _prepare_inputs(self, tokenizer: PreTrainedTokenizerBase) -> None:
+        """Pre-tokenize all samples and cache for repeated evaluate() calls."""
+        self._cached_inputs = []
+        for ex in self._dataset:
             question = ex["question"]
-
             if self.target_mode == "short":
                 gold_text = _extract_short_answer(ex["answer"])
             else:
                 gold_text = _extract_gold_answer(ex["answer"])
 
-            # Build prompt via chat template
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": USER_TEMPLATE.format(q=question)},
@@ -115,34 +112,64 @@ class GSM8KLogLikelihoodFitness(BaseFitness):
             prompt_text = tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
-
-            # Tokenize prompt and gold answer separately to know the boundary
-            prompt_ids = tokenizer(prompt_text, return_tensors="pt")["input_ids"]
+            prompt_ids = tokenizer(prompt_text, return_tensors="pt")["input_ids"][0]
             full_text = prompt_text + gold_text
-            full_ids = tokenizer(full_text, return_tensors="pt")["input_ids"].to(model.device)
+            full_ids = tokenizer(full_text, return_tensors="pt")["input_ids"][0]
 
-            # The answer tokens start after the prompt
-            answer_start = prompt_ids.shape[1]
+            if full_ids.shape[0] > prompt_ids.shape[0]:
+                self._cached_inputs.append({
+                    "full_ids": full_ids,
+                    "answer_start": prompt_ids.shape[0],
+                })
 
-            # Skip if answer has no tokens beyond prompt
-            if full_ids.shape[1] <= answer_start:
-                continue
+    @torch.inference_mode()
+    def evaluate(self, model: nn.Module, tokenizer: PreTrainedTokenizerBase) -> float:
+        """Compute mean log-likelihood of gold answers. Higher = better.
 
-            # Forward pass — get logits for all positions
-            logits = model(full_ids).logits  # (1, seq_len, vocab_size)
+        Supports batched forward passes via ``batch_size`` for faster evaluation
+        on GPUs with sufficient VRAM (A100/H100).
+        """
+        self._load_data()
+        model.eval()
 
-            # Log-prob of each answer token:
-            # logits[t] predicts token[t+1], so for answer tokens [answer_start:]
-            # we use logits[answer_start-1 : -1]
-            answer_logits = logits[0, answer_start - 1 : -1, :]  # (answer_len, vocab)
-            answer_tokens = full_ids[0, answer_start:]            # (answer_len,)
+        if self._cached_inputs is None:
+            self._prepare_inputs(tokenizer)
 
-            log_probs = torch.nn.functional.log_softmax(answer_logits, dim=-1)
-            token_log_probs = log_probs.gather(1, answer_tokens.unsqueeze(1)).squeeze(1)
+        if not self._cached_inputs:
+            return -float("inf")
 
-            # Mean log-prob over answer tokens for this example
-            total_ll += token_log_probs.mean().item()
+        device = next(model.parameters()).device
+        pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
+        total_ll = 0.0
+        count = 0
 
-        # Average over all examples
-        fitness = total_ll / len(self._dataset) if len(self._dataset) > 0 else -float("inf")
-        return fitness
+        for batch_start in range(0, len(self._cached_inputs), self.batch_size):
+            batch = self._cached_inputs[batch_start:batch_start + self.batch_size]
+            max_len = max(item["full_ids"].shape[0] for item in batch)
+
+            input_ids = torch.full(
+                (len(batch), max_len), pad_id, dtype=torch.long, device=device
+            )
+            attention_mask = torch.zeros(
+                (len(batch), max_len), dtype=torch.long, device=device
+            )
+
+            for i, item in enumerate(batch):
+                ids = item["full_ids"]
+                input_ids[i, :ids.shape[0]] = ids.to(device)
+                attention_mask[i, :ids.shape[0]] = 1
+
+            logits = model(input_ids, attention_mask=attention_mask).logits
+            log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+
+            for i, item in enumerate(batch):
+                ans_start = item["answer_start"]
+                seq_len = item["full_ids"].shape[0]
+
+                ans_log_probs = log_probs[i, ans_start - 1 : seq_len - 1, :]
+                ans_tokens = input_ids[i, ans_start:seq_len]
+                token_lls = ans_log_probs.gather(1, ans_tokens.unsqueeze(1)).squeeze(1)
+                total_ll += token_lls.mean().item()
+                count += 1
+
+        return total_ll / count if count > 0 else -float("inf")

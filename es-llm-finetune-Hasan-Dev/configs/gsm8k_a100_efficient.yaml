@@ -1,0 +1,63 @@
+# ──────────────────────────────────────────────
+#  Optimiertes ES-Training für A100/H100 GPUs
+#  Basierend auf: Salimans et al. 2017
+#  "Evolution Strategies as a Scalable Alternative to RL"
+#
+#  Kernverbesserungen:
+#    1. Adam-Optimizer für ES-Gradient (Paper Section 4)
+#    2. Batched Log-Likelihood Fitness (~10x schneller)
+#    3. Cosine Sigma-Decay (exploration → exploitation)
+#    4. Fokussierter Parameterraum (~1.8M statt 14.9M)
+#    5. Größere Population + mehr Samples (A100 Throughput)
+#
+#  Erwartete Laufzeit: ~15-30 Min. auf A100
+#  Total Inferenzen: 100 × 64 × 80 = 512.000
+# ──────────────────────────────────────────────
+
+model:
+  name: "Qwen/Qwen2.5-0.5B-Instruct"
+  dtype: "float16"
+  device: "cuda"
+
+layer_selection:
+  strategy: "by_index"
+  layer_indices: [23]
+  components: "attention"          # q/k/v/o_proj → ~1.8M Parameter (tractable für ES)
+
+es:
+  algorithm: "openai_es"
+  population_size: 64              # 32 antithetic Paare → stabiler Gradient
+  sigma: 0.005                     # Startwert (höher bei weniger Params)
+  learning_rate: 0.01              # Höher dank Adam
+  num_generations: 100
+  seed: 42
+  antithetic: true
+  fitness_shaping: "centered_rank"
+  weight_decay: 0.001
+
+  # Adam-Optimizer (Salimans et al. 2017, Section 4)
+  optimizer: "adam"
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+
+  # Sigma-Schedule: Start hoch → sinkt für feinere Justierung
+  sigma_decay: "cosine"
+  sigma_final: 0.001
+
+fitness:
+  task: "gsm8k_loglikelihood"
+  split: "train"
+  num_samples: 80                  # Stabil genug für gutes Signal
+  target_mode: "short"             # Nur "#### <number>" → fokussiertes Signal
+  batch_size: 16                   # A100: 16-32 problemlos
+
+output:
+  dir: "/content/experiments/runs"
+  run_name: "gsm8k_a100_efficient"
+  save_every: 25
+  log_every: 1
+
+eval:
+  task: "gsm8k"
+  split: "test"
+  num_samples: 200
