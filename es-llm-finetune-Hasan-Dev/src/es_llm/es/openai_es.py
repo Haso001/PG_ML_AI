@@ -88,6 +88,12 @@ class OpenAIES(BaseES):
         sigma_decay: str = "constant",
         sigma_final: float | None = None,
         max_generations: int | None = None,
+        # Adaptive sigma parameters
+        sigma_adapt_patience: int = 0,
+        sigma_adapt_up: float = 1.5,
+        sigma_adapt_down: float = 0.85,
+        sigma_min: float = 0.0005,
+        sigma_max: float | None = None,
     ):
         self.population_size = population_size
         self.sigma = sigma
@@ -119,8 +125,21 @@ class OpenAIES(BaseES):
         self._generation: int = 0
         self._cached_sigma: float = sigma
 
+        # Adaptive sigma: increase on stagnation, decrease on improvement
+        self.sigma_adapt_patience = sigma_adapt_patience  # 0 = disabled
+        self.sigma_adapt_up = sigma_adapt_up
+        self.sigma_adapt_down = sigma_adapt_down
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max if sigma_max is not None else sigma * 3.0
+        self._adaptive_sigma: float = sigma
+        self._best_seen: float = -float("inf")
+        self._stagnation_counter: int = 0
+
     def _get_sigma(self) -> float:
-        """Return current sigma, potentially decayed over generations."""
+        """Return current sigma, potentially decayed or adapted."""
+        # Adaptive sigma overrides fixed schedules
+        if self.sigma_decay == "adaptive":
+            return self._adaptive_sigma
         if self.sigma_decay == "constant" or self.max_generations is None or self.max_generations <= 0:
             return self.sigma
         progress = min(self._generation / self.max_generations, 1.0)
@@ -129,6 +148,30 @@ class OpenAIES(BaseES):
         elif self.sigma_decay == "linear":
             return self.sigma + (self.sigma_final - self.sigma) * progress
         return self.sigma
+
+    def _adapt_sigma(self, best_fitness: float) -> None:
+        """Adapt sigma based on fitness improvement (only for sigma_decay='adaptive').
+
+        If best_fitness improves: shrink sigma (exploit the good region).
+        If no improvement for `patience` generations: grow sigma (explore more).
+        """
+        if best_fitness > self._best_seen:
+            self._best_seen = best_fitness
+            self._stagnation_counter = 0
+            self._adaptive_sigma = max(
+                self._adaptive_sigma * self.sigma_adapt_down,
+                self.sigma_min,
+            )
+            logger.debug("σ-adapt: improvement → σ=%.5f", self._adaptive_sigma)
+        else:
+            self._stagnation_counter += 1
+            if self._stagnation_counter >= self.sigma_adapt_patience:
+                self._adaptive_sigma = min(
+                    self._adaptive_sigma * self.sigma_adapt_up,
+                    self.sigma_max,
+                )
+                self._stagnation_counter = 0
+                logger.debug("σ-adapt: stagnation → σ=%.5f", self._adaptive_sigma)
 
     @property
     def current_sigma(self) -> float:
@@ -224,6 +267,11 @@ class OpenAIES(BaseES):
 
         # Stats
         best_idx = int(np.argmax(fitnesses))
+
+        # Adaptive sigma adjustment
+        if self.sigma_decay == "adaptive":
+            self._adapt_sigma(fitnesses[best_idx])
+
         return ESResult(
             new_params=new_params,
             best_fitness=fitnesses[best_idx],

@@ -1,20 +1,22 @@
 # ──────────────────────────────────────────────
-#  ES-Training v3: Bugfix Reshuffling + optimierte Hyperparams
+#  ES-Training v4: Adaptive Sigma + alle v3-Fixes
 #  Budget: ~1 Stunde auf A100
 #
-#  v2 → v3 Fixes:
-#   1. BUGFIX: Reshuffle pro GENERATION (nicht pro Kandidat!)
-#      v2 gab jedem Kandidaten ANDERE Fragen → ES-Gradient war Rauschen
-#   2. sigma_final: 0.0015 (statt 0.0008) → Exploration stirbt nicht ab
-#   3. num_generations: 80 (statt 150) → v2 stagnierte ab Gen 70
-#   4. weight_decay: 0.003 (statt 0.005) → weniger aggressiv
-#   5. sigma: 0.004 (statt 0.003) → mehr Exploration am Anfang
+#  v3 → v4 Verbesserung:
+#   1. ADAPTIVE SIGMA statt Cosine-Decay:
+#      - Verbesserung → sigma schrumpft (*0.85) → feinere Suche
+#      - Stagnation (5 Gen) → sigma wächst (*1.5) → neue Exploration
+#      - Bereich: [0.001, 0.01] → nie zu klein, nie zu groß
+#   2. Alle v3-Fixes bleiben: Reshuffle/Gen, full reasoning, etc.
+#
+#  Warum adaptive?  v2 stagnierte ab Gen 70 weil sigma blind
+#  auf 0.0008 fiel → kein Entkommen aus dem Plateau.
+#  Adaptive sigma reagiert auf die tatsächliche Fitness-Dynamik.
 #
 #  Train-Split: "train" (7473 Fragen) → nur zum Trainieren
 #  Eval-Split:  "test"  (1319 Fragen) → komplett andere Fragen
 #
 #  Erwartete Laufzeit: ~30-45 Min. auf A100
-#  (Tokenisierung nur 1×/Gen statt 96×/Gen → massive Speedup)
 # ──────────────────────────────────────────────
 
 model:
@@ -30,20 +32,25 @@ layer_selection:
 es:
   algorithm: "openai_es"
   population_size: 96               # 48 antithetic Paare → stabile Gradienten
-  sigma: 0.004                       # Etwas mehr Exploration am Anfang
+  sigma: 0.004                       # Start-Sigma
   learning_rate: 0.001               # Moderat mit Adam
-  num_generations: 80                # v2 stagnierte ab Gen 70 → kein Overrun
+  num_generations: 80                # Budget: 80 Generationen
   seed: 42
   antithetic: true
   fitness_shaping: "centered_rank"
-  weight_decay: 0.003                # Weniger aggressiv als v2
+  weight_decay: 0.003                # Moderate Regularisierung
 
   optimizer: "adam"
   adam_beta1: 0.9
   adam_beta2: 0.999
 
-  sigma_decay: "cosine"
-  sigma_final: 0.0015               # Höher als v2 → Exploration bleibt aktiv
+  # Adaptive Sigma: reagiert auf Training-Dynamik
+  sigma_decay: "adaptive"
+  sigma_adapt_patience: 5            # Nach 5 Gen Stagnation → sigma hoch
+  sigma_adapt_up: 1.5                # Stagnation: sigma * 1.5
+  sigma_adapt_down: 0.85             # Verbesserung: sigma * 0.85
+  sigma_min: 0.001                   # Nie unter 0.001
+  sigma_max: 0.01                    # Nie über 0.01
 
 fitness:
   task: "gsm8k_loglikelihood"
@@ -56,7 +63,7 @@ fitness:
 
 output:
   dir: "/content/experiments/runs"
-  run_name: "gsm8k_a100_v3"
+  run_name: "gsm8k_a100_v4"
   save_every: 20
   log_every: 1
 
