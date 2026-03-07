@@ -190,6 +190,9 @@ def train(cfg: dict) -> Path:
     for gen in tqdm(range(1, num_generations + 1), desc="Generationen", unit="gen"):
         t0 = time.time()
 
+        # Reshuffle data for this generation (if supported)
+        fitness.reshuffle_data()
+
         # Ask: generate candidates
         candidates = es.ask(current_params)
         print(f"\n── Generation {gen}/{num_generations} ──", flush=True)

@@ -1,24 +1,20 @@
 # ──────────────────────────────────────────────
-#  ES-Training v2: Fixes für Proxy-Mismatch & Catastrophic Forgetting
+#  ES-Training v3: Bugfix Reshuffling + optimierte Hyperparams
 #  Budget: ~1 Stunde auf A100
 #
-#  Kernänderungen gegenüber gsm8k_a100_efficient.yaml:
-#   1. target_mode: "full" → LL über vollständiges Reasoning
-#   2. reshuffle: true → jede Generation neue zufällige Beispiele
-#   3. pool_size: 5000 → großer Datenpool gegen Overfitting
-#   4. layer_indices: [20, 21] → mittlere/späte Layers statt nur letzter
-#   5. learning_rate: 0.001 → moderat mit Adam
-#   6. sigma: 0.003 → ausgewogen: genug Exploration, nicht destruktiv
-#   7. weight_decay: 0.005 → Regularisierung gegen param-drift
-#   8. population_size: 96 → stabile Gradienten-Schätzung
-#   9. num_generations: 150 → genug Schritte für echten Fortschritt
+#  v2 → v3 Fixes:
+#   1. BUGFIX: Reshuffle pro GENERATION (nicht pro Kandidat!)
+#      v2 gab jedem Kandidaten ANDERE Fragen → ES-Gradient war Rauschen
+#   2. sigma_final: 0.0015 (statt 0.0008) → Exploration stirbt nicht ab
+#   3. num_generations: 80 (statt 150) → v2 stagnierte ab Gen 70
+#   4. weight_decay: 0.003 (statt 0.005) → weniger aggressiv
+#   5. sigma: 0.004 (statt 0.003) → mehr Exploration am Anfang
 #
 #  Train-Split: "train" (7473 Fragen) → nur zum Trainieren
 #  Eval-Split:  "test"  (1319 Fragen) → komplett andere Fragen
 #
-#  Erwartete Laufzeit: ~45-60 Min. auf A100
-#  Inferenzen/Gen: 96 Kandidaten × 100 Samples = 9.600
-#  Total: 150 × 9.600 = 1.440.000 (auf jeweils frischen Daten!)
+#  Erwartete Laufzeit: ~30-45 Min. auf A100
+#  (Tokenisierung nur 1×/Gen statt 96×/Gen → massive Speedup)
 # ──────────────────────────────────────────────
 
 model:
@@ -28,40 +24,40 @@ model:
 
 layer_selection:
   strategy: "by_index"
-  layer_indices: [20, 21]           # Mittlere/späte Layers: genug Kapazität, weniger Risiko
+  layer_indices: [20, 21]           # Mittlere/späte Layers
   components: "attention"            # q/k/v/o_proj → ~3.6M Parameter
 
 es:
   algorithm: "openai_es"
-  population_size: 96               # 48 antithetic Paare → sehr stabile Gradienten
-  sigma: 0.003                       # Ausgewogen: genug Exploration, nicht destruktiv
+  population_size: 96               # 48 antithetic Paare → stabile Gradienten
+  sigma: 0.004                       # Etwas mehr Exploration am Anfang
   learning_rate: 0.001               # Moderat mit Adam
-  num_generations: 150               # Genug Schritte für echten Fortschritt
+  num_generations: 80                # v2 stagnierte ab Gen 70 → kein Overrun
   seed: 42
   antithetic: true
   fitness_shaping: "centered_rank"
-  weight_decay: 0.005                # Stärker → Parameter bleiben nahe am Original
+  weight_decay: 0.003                # Weniger aggressiv als v2
 
   optimizer: "adam"
   adam_beta1: 0.9
   adam_beta2: 0.999
 
   sigma_decay: "cosine"
-  sigma_final: 0.0008
+  sigma_final: 0.0015               # Höher als v2 → Exploration bleibt aktiv
 
 fitness:
   task: "gsm8k_loglikelihood"
   split: "train"                     # NUR train-Split zum Trainieren!
-  num_samples: 100                   # Pro Generation 100 zufällige Beispiele
-  pool_size: 5000                    # Pool: ~67% des GSM8K train split (7473 total)
-  reshuffle: true                    # JEDE Generation bekommt neue Beispiele!
+  num_samples: 100                   # Pro Generation 100 Beispiele
+  pool_size: 5000                    # Pool: ~67% des GSM8K train split
+  reshuffle: true                    # Pro GENERATION neue Beispiele (FIXED!)
   target_mode: "full"                # Volles Step-by-Step Reasoning
-  batch_size: 8                      # A100: 8 passt gut bei langen "full"-Sequenzen
+  batch_size: 8                      # A100: 8 passt gut bei langen Sequenzen
 
 output:
   dir: "/content/experiments/runs"
-  run_name: "gsm8k_a100_v2"
-  save_every: 25
+  run_name: "gsm8k_a100_v3"
+  save_every: 20
   log_every: 1
 
 eval:

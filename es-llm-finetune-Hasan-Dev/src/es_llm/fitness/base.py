@@ -22,3 +22,6 @@ class BaseFitness(ABC):
     @abstractmethod
     def name(self) -> str:
         """Human-readable name of this fitness function."""
+
+    def reshuffle_data(self) -> None:
+        """Signal a new generation — subclasses may resample data."""

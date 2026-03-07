@@ -95,10 +95,14 @@ class GSM8KLogLikelihoodFitness(BaseFitness):
         self._full_pool = None          # full data pool for reshuffling
         self._cached_inputs: list[dict] | None = None
         self._rng = random.Random(seed)
+        self._needs_reshuffle = True     # reshuffle on first call
+
+    def reshuffle_data(self) -> None:
+        """Signal that a new generation starts — resample data on next evaluate()."""
+        if self.reshuffle:
+            self._needs_reshuffle = True
 
     def _load_data(self):
-        if self._dataset is not None and not self.reshuffle:
-            return
         if self._full_pool is None:
             logger.info("Loading GSM8K dataset (split=%s)...", self.split)
             ds = load_dataset("openai/gsm8k", "main", split=self.split)
@@ -108,19 +112,20 @@ class GSM8KLogLikelihoodFitness(BaseFitness):
             self._full_pool = ds
             logger.info("GSM8K pool loaded: %d examples", len(self._full_pool))
 
-        if self.reshuffle:
-            # Draw a fresh random subset each call
+        if self.reshuffle and self._needs_reshuffle:
+            # Draw a fresh random subset — once per generation, not per candidate!
             indices = self._rng.sample(
                 range(len(self._full_pool)),
                 min(self.num_samples, len(self._full_pool)),
             )
             self._dataset = self._full_pool.select(indices)
             self._cached_inputs = None   # force re-tokenization
+            self._needs_reshuffle = False
+            logger.debug("Reshuffled: %d new examples for this generation", len(self._dataset))
         elif self._dataset is None:
             self._dataset = self._full_pool.select(
                 range(min(self.num_samples, len(self._full_pool)))
             )
-        logger.debug("Using %d examples for this evaluation", len(self._dataset))
 
     def name(self) -> str:
         return f"gsm8k_ll_{self.split}_{self.num_samples}"
