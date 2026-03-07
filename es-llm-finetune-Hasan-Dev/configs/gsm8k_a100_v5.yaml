@@ -1,0 +1,73 @@
+# ──────────────────────────────────────────────
+#  ES-Training v5: Breitere Layer-Abdeckung
+#  Budget: ~1 Stunde auf A100
+#
+#  v3 → v5 Änderungen:
+#   1. 4 Layers [18,19,20,21] statt 2 → ~7.2M Parameter (doppelt so viel)
+#   2. sigma: 0.003 (statt 0.004) → mehr Params braucht kleinere Perturbation
+#   3. sigma_final: 0.001 → kann tiefer fallen weil mehr Kapazität
+#   4. num_generations: 100 → mehr Budget für doppelt so viele Params
+#   5. num_samples: 120 → stabilerer Fitness-Gradient
+#   6. learning_rate: 0.0008 → etwas konservativer bei mehr Params
+#
+#  Warum 4 Layers?
+#   - v3 mit 2 Layers (20,21) erreichte +5% → Kapazitäts-Limit
+#   - Layers 18,19 sind sicher (weit genug vom lm_head für kein Forgetting)
+#   - Doppelte Parameter = doppelte Optimierungs-Kapazität
+#
+#  Laufzeit-Schätzung:
+#   v3: 80 Gen × ~45s/gen ≈ 60 min
+#   v5: 100 Gen × ~45s/gen ≈ 75 min (ES-Kosten hängen kaum von #Params ab,
+#       weil Fitness-Eval dominiert, nicht die Perturbation)
+#
+#  Train-Split: "train" (7473 Fragen) → nur zum Trainieren
+#  Eval-Split:  "test"  (1319 Fragen) → komplett andere Fragen
+# ──────────────────────────────────────────────
+
+model:
+  name: "Qwen/Qwen2.5-0.5B-Instruct"
+  dtype: "float16"
+  device: "cuda"
+
+layer_selection:
+  strategy: "by_index"
+  layer_indices: [18, 19, 20, 21]   # 4 Layers → ~7.2M Parameter
+  components: "attention"            # q/k/v/o_proj
+
+es:
+  algorithm: "openai_es"
+  population_size: 96               # 48 antithetic Paare
+  sigma: 0.003                       # Kleiner als v3: mehr Params → kleinere Störung
+  learning_rate: 0.0008              # Etwas konservativer bei mehr Params
+  num_generations: 100               # Mehr Budget für mehr Kapazität
+  seed: 42
+  antithetic: true
+  fitness_shaping: "centered_rank"
+  weight_decay: 0.002                # Leichter: mehr Params → weniger Druck nötig
+
+  optimizer: "adam"
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+
+  sigma_decay: "cosine"
+  sigma_final: 0.001                 # Kann tiefer → mehr Kapazität zum Exploitieren
+
+fitness:
+  task: "gsm8k_loglikelihood"
+  split: "train"
+  num_samples: 120                   # Mehr Samples → stabilerer Gradient
+  pool_size: 5000
+  reshuffle: true
+  target_mode: "full"
+  batch_size: 12                      # A100: 12 passt locker bei 0.5B-Modell
+
+output:
+  dir: "/content/experiments/runs"
+  run_name: "gsm8k_a100_v5"
+  save_every: 20
+  log_every: 1
+
+eval:
+  task: "gsm8k"
+  split: "test"
+  num_samples: 200

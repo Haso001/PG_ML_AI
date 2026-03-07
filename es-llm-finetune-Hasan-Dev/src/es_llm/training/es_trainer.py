@@ -54,11 +54,6 @@ def _build_es(cfg: dict) -> BaseES:
             sigma_decay=es_cfg.get("sigma_decay", "constant"),
             sigma_final=es_cfg.get("sigma_final"),
             max_generations=es_cfg.get("num_generations"),
-            sigma_adapt_patience=es_cfg.get("sigma_adapt_patience", 5),
-            sigma_adapt_up=es_cfg.get("sigma_adapt_up", 1.5),
-            sigma_adapt_down=es_cfg.get("sigma_adapt_down", 0.85),
-            sigma_min=es_cfg.get("sigma_min"),
-            sigma_max=es_cfg.get("sigma_max"),
         )
     elif algo == "cma_es":
         return CMA_ES(
