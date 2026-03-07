@@ -12,6 +12,7 @@ One forward pass per sample (~0.1s) instead of autoregressive generation (~2s).
 from __future__ import annotations
 
 import logging
+import random
 import re
 from typing import Optional
 
@@ -65,6 +66,12 @@ class GSM8KLogLikelihoodFitness(BaseFitness):
         ``"full"`` = score the entire step-by-step solution (slower, richer signal).
     seed : int
         Seed for subset selection.
+    reshuffle : bool
+        If True, sample a new random subset of ``num_samples`` from the full
+        dataset on each ``evaluate()`` call.  Prevents overfitting to a fixed
+        set when ES runs many generations.
+    pool_size : int or None
+        Size of the data pool to draw from.  ``None`` = use the entire split.
     """
 
     def __init__(
@@ -74,23 +81,46 @@ class GSM8KLogLikelihoodFitness(BaseFitness):
         target_mode: str = "short",
         seed: int = 42,
         batch_size: int = 1,
+        reshuffle: bool = False,
+        pool_size: int | None = None,
     ):
         self.num_samples = num_samples
         self.split = split
         self.target_mode = target_mode
         self.seed = seed
         self.batch_size = batch_size
+        self.reshuffle = reshuffle
+        self.pool_size = pool_size
         self._dataset = None
+        self._full_pool = None          # full data pool for reshuffling
         self._cached_inputs: list[dict] | None = None
+        self._rng = random.Random(seed)
 
     def _load_data(self):
-        if self._dataset is not None:
+        if self._dataset is not None and not self.reshuffle:
             return
-        logger.info("Loading GSM8K dataset (split=%s, n=%d)...", self.split, self.num_samples)
-        ds = load_dataset("openai/gsm8k", "main", split=self.split)
-        ds = ds.shuffle(seed=self.seed)
-        self._dataset = ds.select(range(min(self.num_samples, len(ds))))
-        logger.info("GSM8K loaded: %d examples", len(self._dataset))
+        if self._full_pool is None:
+            logger.info("Loading GSM8K dataset (split=%s)...", self.split)
+            ds = load_dataset("openai/gsm8k", "main", split=self.split)
+            ds = ds.shuffle(seed=self.seed)
+            if self.pool_size is not None:
+                ds = ds.select(range(min(self.pool_size, len(ds))))
+            self._full_pool = ds
+            logger.info("GSM8K pool loaded: %d examples", len(self._full_pool))
+
+        if self.reshuffle:
+            # Draw a fresh random subset each call
+            indices = self._rng.sample(
+                range(len(self._full_pool)),
+                min(self.num_samples, len(self._full_pool)),
+            )
+            self._dataset = self._full_pool.select(indices)
+            self._cached_inputs = None   # force re-tokenization
+        elif self._dataset is None:
+            self._dataset = self._full_pool.select(
+                range(min(self.num_samples, len(self._full_pool)))
+            )
+        logger.debug("Using %d examples for this evaluation", len(self._dataset))
 
     def name(self) -> str:
         return f"gsm8k_ll_{self.split}_{self.num_samples}"

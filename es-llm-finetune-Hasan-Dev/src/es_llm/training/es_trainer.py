@@ -84,6 +84,8 @@ def _build_fitness(cfg: dict) -> BaseFitness:
             target_mode=fit_cfg.get("target_mode", "short"),
             seed=cfg["es"].get("seed", 42),
             batch_size=fit_cfg.get("batch_size", 1),
+            reshuffle=fit_cfg.get("reshuffle", False),
+            pool_size=fit_cfg.get("pool_size", None),
         )
     else:
         raise ValueError(f"Unknown fitness task: {task}")
