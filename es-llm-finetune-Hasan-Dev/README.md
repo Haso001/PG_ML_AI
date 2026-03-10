@@ -112,6 +112,42 @@ docker run --rm -it -v "$PWD:/work" es-llm:cpu-olmes \
     --cached-output-dir /work/cache
 ```
 
+### Multi-Task Eval fuer `minerva_math_algebra` + `hellaswag`
+
+Fuer dein naechstes Setup kannst du beide Tasks in einem Lauf evaluieren.
+
+1) Verfuegbare OLMES-Tasknamen pruefen:
+```bash
+docker run --rm -it es-llm:cpu-olmes olmes --list-tasks | grep -E "minerva|hellaswag"
+```
+
+2) Mit dem neuen Helper-Skript evaluieren:
+```bash
+python scripts/eval_olmes_tasks.py \
+  --run experiments/runs/gsm8k_last_layer_es \
+  --tasks minerva_math_algebra hellaswag \
+  --limit 200 \
+  --num_shots 0 \
+  --batch_size 1 \
+  --cache_dir cache
+```
+
+3) Direkt mit OLMES (ohne Helper):
+```bash
+olmes \
+  --model experiments/runs/gsm8k_last_layer_es/model \
+  --model-type hf \
+  --task minerva_math_algebra,hellaswag \
+  --num-shots 0 \
+  --limit 200 \
+  --output-dir out/minerva_hellaswag \
+  --cached-output-dir cache
+```
+
+Hinweis:
+- Das UI unter `ui/olmes_ui.py` unterstuetzt jetzt Multi-Select fuer mehrere Tasks in einem Run.
+- Falls ein Taskname nicht exakt stimmt, nutze die Ausgabe von `olmes --list-tasks`.
+
 # C) Modell-Args (z. B. trust_remote_code / device_map)
 ```bash
 docker run --rm -it -v "$PWD:/work" es-llm:cpu-olmes \

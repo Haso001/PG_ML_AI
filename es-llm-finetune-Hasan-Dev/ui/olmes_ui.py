@@ -197,7 +197,7 @@ def load_recorded_inputs(out_dir: Path) -> Dict[Tuple[str, int], dict]:
 class RunConfig:
     model: str
     model_type: str
-    task: str
+    tasks: List[str]
     limit: str
     num_shots: int
     output_dir: str
@@ -206,11 +206,12 @@ class RunConfig:
     extra_args: str
 
 def run_olmes(cfg: RunConfig) -> int:
+    task_arg = ",".join(cfg.tasks)
     cmd = [
         "olmes",
         "--model", cfg.model,
         "--model-type", cfg.model_type,
-        "--task", cfg.task,
+        "--task", task_arg,
         "--limit", str(cfg.limit),
         "--num-shots", str(cfg.num_shots),
         "--batch-size", str(cfg.batch_size),
@@ -270,13 +271,23 @@ if mode == "Run Evaluation":
     model_type = st.sidebar.selectbox("Model Type", ["hf", "vllm"], index=0)
     tasks, task_err = load_olmes_tasks()
     if tasks:
-        default_task = "gsm8k" if "gsm8k" in tasks else tasks[0]
-        task = st.sidebar.selectbox("Task", tasks, index=tasks.index(default_task))
+        defaults = []
+        for preferred in ["gsm8k", "hellaswag", "minerva_math_algebra"]:
+            if preferred in tasks:
+                defaults.append(preferred)
+        if not defaults:
+            defaults = [tasks[0]]
+        selected_tasks = st.sidebar.multiselect("Tasks", tasks, default=defaults)
     else:
         st.sidebar.caption("Keine Tasks gefunden (olmes --list-tasks fehlgeschlagen).")
         if task_err:
             st.sidebar.code(task_err, language="text")
-        task = st.sidebar.text_input("Task", "gsm8k")
+        task_raw = st.sidebar.text_input("Tasks (kommagetrennt)", "gsm8k")
+        selected_tasks = [t.strip() for t in task_raw.split(",") if t.strip()]
+
+    if not selected_tasks:
+        st.sidebar.warning("Bitte mindestens einen Task auswählen.")
+        selected_tasks = ["gsm8k"]
     limit = st.sidebar.text_input("Limit (z.B. 20 oder 0.1)", "20")
     num_shots = st.sidebar.number_input("num_shots", min_value=0, max_value=50, value=0, step=1)
     batch_size = st.sidebar.number_input("batch_size", min_value=1, max_value=256, value=1, step=1)
@@ -284,7 +295,10 @@ if mode == "Run Evaluation":
     # Automatischer Timestamp: gsm8k-26-01-2026-14-30
     now = datetime.now()
     timestamp = now.strftime("%d-%m-%Y-%H-%M")
-    auto_run_name = f"{task}-{timestamp}"
+    run_prefix = "-".join(selected_tasks[:2])
+    if len(selected_tasks) > 2:
+        run_prefix += f"-plus{len(selected_tasks) - 2}"
+    auto_run_name = f"{run_prefix}-{timestamp}"
 
     # Put each run in a task+date folder so the user doesn't care about task-000- files
     run_name = st.sidebar.text_input("Run Name (Ordnername)", auto_run_name)
@@ -302,7 +316,7 @@ if mode == "Run Evaluation":
         cfg = RunConfig(
             model=model,
             model_type=model_type,
-            task=task,
+            tasks=selected_tasks,
             limit=limit,
             num_shots=int(num_shots),
             output_dir=output_dir,
