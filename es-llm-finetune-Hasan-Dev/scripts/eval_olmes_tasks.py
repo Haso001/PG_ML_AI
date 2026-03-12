@@ -23,7 +23,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -31,10 +33,34 @@ from pathlib import Path
 from typing import List, Tuple
 
 
+def _resolve_olmes_cmd() -> Tuple[List[str], str]:
+    """Resolve the evaluator command.
+
+    Priority:
+    1) OLMES_BIN env var (explicit override)
+    2) `olmes` on PATH
+    3) `oe-eval` on PATH
+    """
+    explicit = (os.environ.get("OLMES_BIN") or "").strip()
+    if explicit:
+        return [explicit], explicit
+
+    for candidate in ["olmes", "oe-eval"]:
+        found = shutil.which(candidate)
+        if found:
+            return [candidate], candidate
+
+    return [], ""
+
+
 def _list_olmes_tasks() -> Tuple[List[str], str]:
     """Return available OLMES tasks and raw command output."""
+    cmd_prefix, cmd_name = _resolve_olmes_cmd()
+    if not cmd_prefix:
+        return [], "No evaluator CLI found. Tried: olmes, oe-eval"
+
     result = subprocess.run(
-        ["olmes", "--list-tasks"],
+        cmd_prefix + ["--list-tasks"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -153,6 +179,11 @@ def main() -> int:
         print(raw_list_output or "<empty>", file=sys.stderr)
         return 1
 
+    cmd_prefix, cmd_name = _resolve_olmes_cmd()
+    if not cmd_prefix:
+        print("No evaluator CLI available (expected `olmes` or `oe-eval`).", file=sys.stderr)
+        return 1
+
     resolved_tasks, missing = _resolve_tasks(args.tasks, available_tasks)
     if missing:
         print("Some tasks could not be resolved:", ", ".join(missing), file=sys.stderr)
@@ -160,8 +191,7 @@ def main() -> int:
         return 1
 
     task_arg = ",".join(resolved_tasks)
-    cmd = [
-        "olmes",
+    cmd = cmd_prefix + [
         "--model", model,
         "--model-type", args.model_type,
         "--task", task_arg,
@@ -175,6 +205,7 @@ def main() -> int:
         cmd.extend(shlex.split(args.extra_args.strip()))
 
     print("Running:")
+    print(f"Evaluator CLI: {cmd_name}")
     print(" ".join(shlex.quote(c) for c in cmd))
     proc = subprocess.run(cmd, check=False)
 
