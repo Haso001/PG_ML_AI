@@ -7,6 +7,7 @@ Uses the same extraction/normalization logic as scripts/eval_gsm8k.py.
 from __future__ import annotations
 
 import logging
+import random
 import re
 from typing import Optional
 
@@ -69,6 +70,11 @@ class GSM8KFitness(BaseFitness):
         Maximum tokens to generate per answer.
     seed : int
         Seed for subset selection (for reproducibility across generations).
+    reshuffle : bool
+        If True, sample a fresh random subset of ``num_samples`` for each
+        generation via ``reshuffle_data()``.
+    pool_size : int or None
+        Optional cap for the training/eval pool size. ``None`` uses full split.
     """
 
     def __init__(
@@ -77,22 +83,50 @@ class GSM8KFitness(BaseFitness):
         split: str = "train",
         max_new_tokens: int = 256,
         seed: int = 42,
+        reshuffle: bool = False,
+        pool_size: int | None = None,
     ):
         self.num_samples = num_samples
         self.split = split
         self.max_new_tokens = max_new_tokens
         self.seed = seed
+        self.reshuffle = reshuffle
+        self.pool_size = pool_size
         self._dataset = None
+        self._full_pool = None
+        self._rng = random.Random(seed)
+        self._needs_reshuffle = True
+
+    def reshuffle_data(self) -> None:
+        """Signal a new generation so next evaluate() uses a fresh subset."""
+        if self.reshuffle:
+            self._needs_reshuffle = True
 
     def _load_data(self):
-        if self._dataset is not None:
-            return
-        logger.info("Loading GSM8K dataset (split=%s, n=%d)...", self.split, self.num_samples)
-        ds = load_dataset("openai/gsm8k", "main", split=self.split)
-        # Fix subset for reproducibility
-        ds = ds.shuffle(seed=self.seed)
-        self._dataset = ds.select(range(min(self.num_samples, len(ds))))
-        logger.info("GSM8K loaded: %d examples", len(self._dataset))
+        if self._full_pool is None:
+            logger.info("Loading GSM8K dataset (split=%s)...", self.split)
+            ds = load_dataset("openai/gsm8k", "main", split=self.split)
+            ds = ds.shuffle(seed=self.seed)
+            if self.pool_size is not None:
+                ds = ds.select(range(min(self.pool_size, len(ds))))
+            self._full_pool = ds
+            logger.info("GSM8K pool loaded: %d examples", len(self._full_pool))
+
+        if self.reshuffle and self._needs_reshuffle:
+            # New subset once per generation (caller controls via reshuffle_data()).
+            indices = self._rng.sample(
+                range(len(self._full_pool)),
+                min(self.num_samples, len(self._full_pool)),
+            )
+            self._dataset = self._full_pool.select(indices)
+            self._needs_reshuffle = False
+            logger.debug("Reshuffled GSM8K subset: %d examples", len(self._dataset))
+        elif self._dataset is None:
+            # Backward-compatible fixed subset behavior.
+            self._dataset = self._full_pool.select(
+                range(min(self.num_samples, len(self._full_pool)))
+            )
+            logger.info("GSM8K fixed subset loaded: %d examples", len(self._dataset))
 
     def name(self) -> str:
         return f"gsm8k_{self.split}_{self.num_samples}"
