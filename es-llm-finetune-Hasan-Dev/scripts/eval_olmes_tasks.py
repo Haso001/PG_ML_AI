@@ -190,17 +190,18 @@ def main() -> int:
         print("Tip: run `olmes --list-tasks` and use exact names.", file=sys.stderr)
         return 1
 
-    task_arg = ",".join(resolved_tasks)
     cmd = cmd_prefix + [
         "--model", model,
         "--model-type", args.model_type,
-        "--task", task_arg,
         "--limit", str(args.limit),
         "--num-shots", str(args.num_shots),
         "--batch-size", str(args.batch_size),
         "--output-dir", str(out_dir),
         "--cached-output-dir", args.cache_dir,
     ]
+    # OLMES expects one --task flag per task; a comma-joined value is treated as a single unknown task.
+    for task_name in resolved_tasks:
+        cmd.extend(["--task", task_name])
     if args.extra_args.strip():
         cmd.extend(shlex.split(args.extra_args.strip()))
 
