@@ -155,6 +155,38 @@ def parse_args() -> argparse.Namespace:
     return ap.parse_args()
 
 
+def _sanitize_local_tokenizer_config(model_path: str) -> None:
+    """Repair incompatible tokenizer configs produced by mixed transformers versions.
+
+    In some Colab environments, ``tokenizer_config.json`` can contain
+    ``extra_special_tokens`` as a list. Newer transformers expect this field to
+    be a dict and crash with:
+      AttributeError: 'list' object has no attribute 'keys'
+    """
+    p = Path(model_path)
+    if not p.exists() or not p.is_dir():
+        return
+
+    cfg_path = p / "tokenizer_config.json"
+    if not cfg_path.exists():
+        return
+
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+
+    extra = cfg.get("extra_special_tokens")
+    if isinstance(extra, list):
+        # Preserve semantic content in the standard field and remove the
+        # incompatible key that triggers fast-tokenizer init crashes.
+        if extra and "additional_special_tokens" not in cfg:
+            cfg["additional_special_tokens"] = extra
+        cfg.pop("extra_special_tokens", None)
+        cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        print(f"Patched incompatible tokenizer config: {cfg_path}")
+
+
 def main() -> int:
     args = parse_args()
 
@@ -169,6 +201,8 @@ def main() -> int:
     else:
         model = args.model
         run_name = Path(model).name.replace("/", "_")
+
+    _sanitize_local_tokenizer_config(model)
 
     out_dir = Path(args.output_dir) if args.output_dir else Path("out") / f"{run_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     out_dir.mkdir(parents=True, exist_ok=True)
