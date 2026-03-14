@@ -1,0 +1,65 @@
+# ──────────────────────────────────────────────
+#  ES-Training v3: Bugfix Reshuffling + optimierte Hyperparams
+#  Budget: ~1 Stunde auf A100
+#
+#  v2 → v3 Fixes:
+#   1. BUGFIX: Reshuffle pro GENERATION (nicht pro Kandidat!)
+#      v2 gab jedem Kandidaten ANDERE Fragen → ES-Gradient war Rauschen
+#   2. sigma_final: 0.0015 (statt 0.0008) → Exploration stirbt nicht ab
+#   3. num_generations: 80 (statt 150) → v2 stagnierte ab Gen 70
+#   4. weight_decay: 0.003 (statt 0.005) → weniger aggressiv
+#   5. sigma: 0.004 (statt 0.003) → mehr Exploration am Anfang
+#
+#  Train-Split: "train" (7473 Fragen) → nur zum Trainieren
+#  Eval-Split:  "test"  (1319 Fragen) → komplett andere Fragen
+#
+#  Erwartete Laufzeit: ~30-45 Min. auf A100
+# ──────────────────────────────────────────────
+
+model:
+  name: "Qwen/Qwen2.5-0.5B-Instruct"
+  dtype: "float16"
+  device: "cuda"
+
+layer_selection:
+  strategy: "by_index"
+  layer_indices: [20, 21]           # Mittlere/späte Layers
+  components: "attention"            # q/k/v/o_proj → ~3.6M Parameter
+
+es:
+  algorithm: "openai_es"
+  population_size: 96               # 48 antithetic Paare → stabile Gradienten
+  sigma: 0.004                       # Etwas mehr Exploration am Anfang
+  learning_rate: 0.001               # Moderat mit Adam
+  num_generations: 80                # v2 stagnierte ab Gen 70 → kein Overrun
+  seed: 42
+  antithetic: true
+  fitness_shaping: "centered_rank"
+  weight_decay: 0.003                # Weniger aggressiv als v2
+
+  optimizer: "adam"
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+
+  sigma_decay: "cosine"
+  sigma_final: 0.0015               # Höher als v2 → Exploration bleibt aktiv
+
+fitness:
+  task: "gsm8k"
+  split: "train"                     # NUR train-Split zum Trainieren!
+  num_samples: 100                   # Pro Generation 100 Beispiele
+  pool_size: 5000                    # Pool: ~67% des GSM8K train split
+  reshuffle: true                    # Pro GENERATION neue Beispiele (FIXED!)
+  target_mode: "full"                # Volles Step-by-Step Reasoning
+  batch_size: 8                      # A100: 8 passt gut bei langen Sequenzen
+
+output:
+  dir: "/content/experiments/runs"
+  run_name: "gsm8k_base_v1"
+  save_every: 20
+  log_every: 1
+
+eval:
+  task: "gsm8k"
+  split: "test"                      # IMMER test-Split für Evaluation!
+  num_samples: 200
