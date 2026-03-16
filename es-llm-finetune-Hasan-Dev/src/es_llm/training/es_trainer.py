@@ -76,6 +76,7 @@ def _build_fitness(cfg: dict) -> BaseFitness:
             split=fit_cfg.get("split", "train"),
             max_new_tokens=fit_cfg.get("max_new_tokens", 256),
             seed=cfg["es"].get("seed", 42),
+            batch_size=fit_cfg.get("batch_size", 1),
         )
     elif task == "gsm8k_loglikelihood":
         return GSM8KLogLikelihoodFitness(
