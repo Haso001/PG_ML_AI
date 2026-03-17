@@ -1,0 +1,606 @@
+\documentclass[aspectratio=169,11pt]{beamer}
+
+\usetheme{Madrid}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english,ngerman]{babel}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{csquotes}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\lstdefinestyle{pycode}{
+  language=Python,
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{blue!70!black},
+  commentstyle=\color{green!40!black},
+  stringstyle=\color{orange!60!black},
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  framerule=0.3pt,
+  tabsize=2
+}
+
+\title{Use Evolutionary Strategies (ES) to fine-tune large language models (LLMs)}
+\subtitle{Part I: Layer-Weight Optimization on GSM8K (my part)}
+\author{Hasan Yildirim, Olsi Manco}
+\institute{Uni Projekt PG ML/AI}
+\date{19 Maerz, 2026}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\begin{frame}{Presentation Structure}
+\textbf{Short Introduction (shared, before Part I)}
+\begin{itemize}
+  \item Project context and motivation
+  \item Why efficient LLM adaptation matters
+\end{itemize}
+
+\textbf{Part I (this talk segment): Hasan Yildirim}
+\begin{itemize}
+  \item ES-based fine-tuning via layer-weight perturbation
+  \item Binary vs Log-Likelihood fitness and ES vs Backprop discussion
+\end{itemize}
+
+\textbf{Part II (following segment): Olsi Manco}
+\begin{itemize}
+  \item Soft prompting approach for LLM adaptation
+  \item Comparison to layer-weight optimization
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Short Introduction (before Part I)}
+\textbf{Project context}
+\begin{itemize}
+  \item This presentation studies two parameter-efficient adaptation paths for LLMs.
+  \item Part I focuses on Evolutionary Strategies (ES) over layer weights.
+  \item Part II focuses on soft prompting as an alternative adaptation mechanism.
+\end{itemize}
+
+\textbf{Bridge to my part}
+\begin{itemize}
+  \item Key question for Part I: can we improve reasoning performance using a gradient-free optimizer on selected layers?
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Primer 1: What is Fine-Tuning?}
+\textbf{Simple definition}
+\begin{itemize}
+  \item A pre-trained LLM already has broad language knowledge.
+  \item Fine-tuning means adapting this model to a specific task or domain.
+\end{itemize}
+
+\textbf{In this project}
+\begin{itemize}
+  \item Task: mathematical reasoning (GSM8K).
+  \item We do not retrain the full model from scratch.
+  \item We adapt selected model parameters to improve task performance.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Primer 2: Why not only Backpropagation?}
+\textbf{Backpropagation is strong, but not always ideal for our objective space}
+\begin{itemize}
+  \item Backprop needs differentiable training signals.
+  \item Some practical goals are discrete/non-smooth (e.g., exact-match 0/1).
+  \item We also want to test a black-box optimizer that only needs a scalar score.
+\end{itemize}
+
+\textbf{Research angle}
+\begin{itemize}
+  \item Can we still improve LLM behavior when we optimize without explicit gradients?
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Primer 3: ES as a Gradient-Free Alternative}
+\textbf{High-level idea of Evolutionary Strategies (ES)}
+\begin{enumerate}
+  \item Start from current parameter vector $\theta$.
+  \item Create several noisy variants ($\theta + \epsilon_i$).
+  \item Evaluate each variant with a fitness score.
+  \item Move $\theta$ toward better-performing variants.
+\end{enumerate}
+
+\textbf{Key intuition}
+\begin{itemize}
+  \item Backprop asks: \enquote{What is the exact gradient?}
+  \item ES asks: \enquote{Which parameter perturbations worked better?}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Problem Setting: Backpropagation vs ES}
+\textbf{Core problem in this project}
+\begin{itemize}
+  \item We want to optimize task quality on GSM8K, where a natural metric is exact-match (0/1).
+  \item Exact-match is discrete and not smoothly differentiable.
+  \item Standard backpropagation is strongest when we optimize differentiable objectives directly.
+\end{itemize}
+
+\textbf{Why compare with ES?}
+\begin{itemize}
+  \item ES only needs a scalar fitness value per candidate.
+  \item ES can therefore optimize with non-differentiable or noisy task-level signals.
+  \item This gives a practical alternative when gradient quality is weak or objective mismatch is high.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Challenges of the Problem}
+\textbf{Optimization challenges}
+\begin{itemize}
+  \item High-dimensional parameter space, even with layer-wise selection.
+  \item Noisy fitness estimates due to sampling and finite evaluation subsets.
+  \item Trade-off between fast surrogate fitness (LogLik) and final target metric (Exact-Match).
+\end{itemize}
+
+\textbf{Systems and evaluation challenges}
+\begin{itemize}
+  \item ES is evaluation-heavy: population size $\times$ samples per generation.
+  \item Binary evaluation is expensive because of autoregressive generation.
+  \item Fair comparison needs strict protocol control (same seeds, same limits, same splits).
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Motivation}
+\begin{itemize}
+  \item Klassisches LLM-Finetuning basiert auf Backpropagation und dichten Gradienten.
+  \item Viele praxisnahe Zielgroessen sind jedoch diskret oder nicht glatt (z.\,B. Exact-Match auf Aufgabenebene).
+  \item Forschungsfrage: Wie weit kommen wir mit \textbf{gradient-freiem} Finetuning via Evolutionary Strategies (ES)?
+\end{itemize}
+\vspace{0.5em}
+\textbf{Use Case:} Mathematisches Reasoning (GSM8K) mit einem kleinen Instruct-LLM.
+\end{frame}
+
+\begin{frame}{Projektziel und Forschungsfragen}
+\textbf{Ziel:} Verbesserung der Task-Performance durch selektive Anpassung weniger Modellparameter.
+
+\vspace{0.6em}
+\textbf{Forschungsfragen}
+\begin{enumerate}
+  \item Kann ES auf wenigen Decoder-Layern sinnvolle Verbesserungen liefern?
+  \item Welche Fitness-Definition ist fuer ES stabil und effizient?
+  \item Wie verhaelt sich ES konzeptionell zu Backpropagation in diesem Setting?
+\end{enumerate}
+\end{frame}
+
+\begin{frame}{Modellvorstellung und Datensetup}
+\textbf{Basismodell}
+\begin{itemize}
+  \item \texttt{Qwen/Qwen2.5-0.5B-Instruct}
+  \item Causal LM, 24 Decoder-Layer, Instruct-Chat-Format
+\end{itemize}
+
+\textbf{Task}
+\begin{itemize}
+  \item GSM8K (arithmetisches Reasoning)
+  \item Training-Fitness auf \texttt{train}-Split, finale Bewertung auf \texttt{test}-Split
+\end{itemize}
+
+\textbf{Projektarchitektur}
+\begin{itemize}
+  \item Layer-Selektion: \texttt{src/es\_llm/model/layer\_selector.py}
+  \item ES-Optimierer: \texttt{src/es\_llm/es/openai\_es.py}
+  \item Fitness-Module: \texttt{gsm8k.py}, \texttt{gsm8k\_loglikelihood.py}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Task Primer: GSM8K vs HellaSwag (mit Beispiel)}
+\textbf{GSM8K (Grade School Math 8K)}
+\begin{itemize}
+  \item Ziel: mehrschrittige Rechenaufgaben loesen und finale Zahl liefern.
+  \item Beispiel: \enquote{Sara has 12 apples, buys 5, gives away 4. How many remain?}
+  \item Erwartung: Schrittweises Reasoning, finale Antwort z.\,B. \texttt{#### 13}.
+\end{itemize}
+
+\textbf{HellaSwag}
+\begin{itemize}
+  \item Ziel: die plausibelste Fortsetzung einer Situation aus mehreren Optionen waehlen.
+  \item Beispiel: Kontext \enquote{A person cracks eggs into a bowl...}
+  \item Optionen: (A) plausible Koch-Fortsetzung, (B/C/D) unplausible Ablenkungen.
+\end{itemize}
+
+\textbf{Unterschied kurz:}
+\begin{itemize}
+  \item GSM8K misst numerisches/mathematisches Reasoning.
+  \item HellaSwag misst commonsense narrative completion.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Qwen2.5-0.5B: Gesamtstruktur (visuell)}
+\centering
+\small
+\textbf{Token Input}
+
+\vspace{0.25em}
+$\downarrow$
+
+\textbf{Embedding Layer: \texttt{model.embed\_tokens}}
+
+\vspace{0.25em}
+$\downarrow$
+
+\textbf{Decoder Stack: Layer 1, 2, \dots, 24}
+
+\vspace{0.25em}
+$\downarrow$
+
+\textbf{Final Norm: \texttt{model.norm}}
+
+\vspace{0.25em}
+$\downarrow$
+
+\textbf{Output Head: \texttt{lm\_head}}
+
+\vspace{0.8em}
+\begin{columns}[T]
+\column{0.5\textwidth}
+\textbf{Layerbereiche}
+\begin{itemize}
+  \item Fruehe Layer: 1--8
+  \item Mittlere Layer: 9--16
+  \item Spaete Layer: 17--24
+\end{itemize}
+
+\column{0.5\textwidth}
+\textbf{Parameterfamilien im Modell}
+\begin{itemize}
+  \item Embedding-Parameter
+  \item Self-Attention-Parameter
+  \item MLP-Parameter
+  \item LayerNorm-Parameter
+  \item Output-Head-Parameter
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Aufbau eines einzelnen Decoder-Layers}
+\textbf{Pro Layer (z. B. Layer 20) werden strukturell diese Bl"ocke genutzt:}
+
+\vspace{0.4em}
+\begin{columns}[T]
+\column{0.5\textwidth}
+\textbf{1) Attention-Block}
+\begin{itemize}
+  \item \texttt{self\_attn.q\_proj.weight}
+  \item \texttt{self\_attn.k\_proj.weight}
+  \item \texttt{self\_attn.v\_proj.weight}
+  \item \texttt{self\_attn.o\_proj.weight}
+\end{itemize}
+
+\textbf{2) Norms}
+\begin{itemize}
+  \item \texttt{input\_layernorm.weight}
+  \item \texttt{post\_attention\_layernorm.weight}
+\end{itemize}
+
+\column{0.5\textwidth}
+\textbf{3) MLP-Block}
+\begin{itemize}
+  \item \texttt{mlp.gate\_proj.weight}
+  \item \texttt{mlp.up\_proj.weight}
+  \item \texttt{mlp.down\_proj.weight}
+\end{itemize}
+
+\textbf{Fuer dieses Projekt wichtig}
+\begin{itemize}
+  \item Layer-wise Auswahl ueber \texttt{layer\_indices}
+  \item Komponentenwahl ueber \texttt{components}
+  \item Beispiel: nur \texttt{attention} in Layer 18--21
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Warum Layer-wise statt Full Finetuning?}
+\begin{itemize}
+  \item Reduziert Suchraum und Compute-Kosten.
+  \item Ermoeglicht kontrollierte Experimente zu \enquote{welche Layer tragen am meisten bei?}
+  \item Passt zu ES: kleinere, zielgerichtete Parametervektoren sind robuster optimierbar.
+\end{itemize}
+
+\textbf{Konkretes Setup im Projekt}
+\begin{itemize}
+  \item Auswahl nach Layer-Indizes (z.\,B. \texttt{[18,19,20,21]}).
+  \item Komponentenfokus, z.\,B. nur \texttt{attention} statt \texttt{all}.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{ES-Algorithmus (OpenAI-ES)}
+\textbf{Ablauf pro Generation}
+\begin{enumerate}
+  \item \textbf{ask:} Stichprobe von Perturbationen $\epsilon_i \sim \mathcal{N}(0,\sigma^2 I)$
+  \item Kandidaten evaluieren: $F(\theta + \epsilon_i)$
+  \item \textbf{tell:} Parameterupdate auf Basis eines Gradienten-Schaetzers
+\end{enumerate}
+
+\vspace{0.4em}
+\[
+\hat{g} = \frac{1}{N\sigma}\sum_{i=1}^N u_i\,\epsilon_i,
+\qquad
+\theta_{t+1}=\theta_t + \alpha\hat{g}
+\]
+
+\textbf{Im Projekt aktiviert:}
+\begin{itemize}
+  \item Antithetic Sampling
+  \item Fitness shaping (centered rank)
+  \item Optional Adam-Style Update
+  \item Sigma-Decay (z.\,B. cosine)
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Pseudocode: Evolution Strategies (Salimans et al., Alg. 1)}
+\small
+\begin{lstlisting}[style=pycode]
+Algorithm: Evolution Strategies
+
+Input:
+  learning rate alpha,
+  noise standard deviation sigma,
+  initial parameters theta_0
+
+for t = 0, 1, 2, ... do
+  Sample eps_1, ..., eps_n ~ N(0, I)
+
+  Compute returns:
+    F_i = F(theta_t + sigma * eps_i),  i = 1, ..., n
+
+  Update parameters:
+    theta_{t+1} <- theta_t + alpha * (1 / (n * sigma)) *
+                   sum_{i=1..n} (F_i * eps_i)
+end for
+\end{lstlisting}
+
+\textbf{Interpretation:} Der Update-Schritt ist ein stochastischer Gradienten-Schaetzer aus Funktionsauswertungen.
+\end{frame}
+
+\begin{frame}[fragile]{Code: ES \texttt{ask()} und Kandidatenbildung}
+\textbf{Wichtig fuer die Methodik:} Kandidaten entstehen aus Perturbationen, nicht aus Gradienten.
+
+\begin{lstlisting}[style=pycode]
+# src/es_llm/es/openai_es.py
+def ask(self, current_params):
+  sigma = self._get_sigma()
+  if self.antithetic:
+    noises = antithetic_pairs(dim, n_pairs, sigma=sigma)
+  else:
+    noises = [gaussian_noise(dim, sigma=sigma)
+          for _ in range(self.population_size)]
+
+  self._noise_cache = noises
+  candidates = [current_params + eps for eps in noises]
+  return candidates
+\end{lstlisting}
+
+\textbf{Takeaway:} ES sampelt den Suchraum explizit und evaluiert Black-Box-Fitness auf jedem Kandidaten.
+\end{frame}
+
+\begin{frame}[fragile]{Code: ES \texttt{tell()} Update ohne \texttt{backward()}}
+\textbf{Wichtig fuer die Argumentation ES vs Backprop:}
+
+\begin{lstlisting}[style=pycode]
+# src/es_llm/es/openai_es.py
+def tell(self, current_params, candidates, fitnesses):
+  shaped = _centered_rank_transform(fitnesses)
+
+  grad = torch.zeros_like(current_params, dtype=torch.float32)
+  for i, eps in enumerate(self._noise_cache):
+    grad += float(shaped[i]) * eps.float()
+  grad /= len(self._noise_cache) * self._cached_sigma
+
+  new_params = current_params.float() + self.lr * grad
+  return ESResult(new_params=new_params.to(current_params.dtype), ...)
+\end{lstlisting}
+
+\textbf{Takeaway:} Der naechste Parametervektor kommt aus Fitness-gewichteten Stoerungen, nicht aus Autograd-Gradienten.
+\end{frame}
+
+\begin{frame}{Backpropagation vs Evolutionary Strategies}
+\begin{columns}[T]
+\column{0.49\textwidth}
+\textbf{Backpropagation}
+\begin{itemize}
+  \item Nutzt exakte Ableitungen $\nabla_\theta L$
+  \item Effizient bei differenzierbaren Losses
+  \item Braucht Autograd-Graph und \texttt{backward()}
+\end{itemize}
+
+\column{0.49\textwidth}
+\textbf{Evolutionary Strategies}
+\begin{itemize}
+  \item Braucht nur Funktionswerte $F(\theta)$
+  \item Funktioniert auch fuer nicht-differenzierbare Ziele
+  \item Kein \texttt{backward()}, kein expliziter Gradient notwendig
+\end{itemize}
+\end{columns}
+
+\vspace{0.6em}
+\textbf{Kernaussage:} ES ist ein Black-Box-Optimierer; Backprop ist ein Gradient-Optimierer.
+\end{frame}
+
+\begin{frame}{Anlauf 1: Binary Validator als Fitness}
+\textbf{Idee}
+\begin{itemize}
+  \item Prompt $\rightarrow$ \texttt{model.generate(...)}
+  \item Antwort extrahieren (\texttt{#### <answer>})
+  \item Fitness = Exact-Match (0/1)
+\end{itemize}
+
+\textbf{Staerken}
+\begin{itemize}
+  \item Zielmetrik-nah (entspricht Endbewertung)
+  \item Klar interpretierbar
+\end{itemize}
+
+\textbf{Schwaechen}
+\begin{itemize}
+  \item Nicht-differenzierbar und diskret
+  \item Hohe Varianz im ES-Signal
+  \item Langsam durch autoregressive Generierung
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Anlauf 2: Log-Likelihood als Fitness}
+\textbf{Idee}
+\begin{itemize}
+  \item Keine freie Generierung, sondern Scoring der Gold-Token
+  \item Fitness = mittlere Log-Wahrscheinlichkeit der korrekten Antworttokens
+\end{itemize}
+
+\textbf{Warum schneller?}
+\begin{itemize}
+  \item Ein Forward-Pass (bzw. batched Forward-Paesse) statt Token-fuer-Token-Decoding
+  \item Caching der tokenisierten Inputs
+\end{itemize}
+
+\textbf{Warum stabiler fuer ES?}
+\begin{itemize}
+  \item Kontinuierliches Signal statt 0/1-Sprung
+  \item Feineres Ranking zwischen Kandidaten in einer Population
+\end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Code: Binary vs LogLik Fitnesspfad}
+\textbf{Binary (langsam, diskret):}
+\begin{lstlisting}[style=pycode]
+# src/es_llm/fitness/gsm8k.py
+gen = model.generate(**inputs, max_new_tokens=...)
+pred_text = tokenizer.decode(out_ids, skip_special_tokens=True)
+pred = extract_hash_answer(pred_text)
+fitness = int(pred == gold)   # 0/1
+\end{lstlisting}
+
+\textbf{LogLik (schnell, kontinuierlich):}
+\begin{lstlisting}[style=pycode]
+# src/es_llm/fitness/gsm8k_loglikelihood.py
+logits = model(input_ids, attention_mask=attention_mask).logits
+log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+token_lls = ans_log_probs.gather(1, ans_tokens.unsqueeze(1)).squeeze(1)
+fitness = token_lls.mean().item()
+\end{lstlisting}
+
+\textbf{Takeaway:} Beide liefern nur einen Skalar an ES; der Rechenpfad bestimmt Laufzeit und Signalqualitaet.
+\end{frame}
+
+\begin{frame}[fragile]{Code: Trainingsloop (Orchestrierung)}
+\textbf{Projektkern in \texttt{es\_trainer.py}:}
+
+\begin{lstlisting}[style=pycode]
+for gen in range(1, num_generations + 1):
+  fitness.reshuffle_data()
+  candidates = es.ask(current_params)
+
+  fitnesses = []
+  for cand in candidates:
+    selector.set_flat_params(cand)
+    fit = fitness.evaluate(model, tokenizer)
+    fitnesses.append(fit)
+
+  result = es.tell(current_params, candidates, fitnesses)
+  current_params = result.new_params.clone()
+\end{lstlisting}
+
+\textbf{Takeaway:} \texttt{ask -> evaluate -> tell} ist die wiederholte Optimierungsschleife ueber alle Generationen.
+\end{frame}
+
+\begin{frame}{Wichtige konzeptionelle Klarstellung}
+\textbf{Ist Log-Likelihood differenzierbar?} Ja.
+
+\vspace{0.4em}
+\textbf{Nutzen wir diesen Gradient?} Nein, in diesem Projekt nicht.
+\begin{itemize}
+  \item Fitness wird in \texttt{inference\_mode()} berechnet.
+  \item Kein \texttt{loss.backward()} im Trainingsloop.
+  \item Naechster Parametervektor kommt aus ES-\texttt{ask/tell}, nicht aus Autograd.
+\end{itemize}
+
+\vspace{0.5em}
+\textbf{Interpretation}
+\begin{itemize}
+  \item Binary zeigt, dass ES auf nicht-differenzierbaren Zielen funktioniert.
+  \item LogLik zeigt, dass ES auch auf differenzierbaren Surrogates praktikabel und schneller sein kann.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Experimentelles Setup (Beispielkonfiguration)}
+\textbf{Konfiguration: \texttt{gsm8k\_a100\_v5.yaml}}
+\begin{itemize}
+  \item Layer: \texttt{[18,19,20,21]}, Komponenten: \texttt{attention}
+  \item ES: Population 96, 100 Generationen, $\sigma:0.003 \rightarrow 0.001$ (cosine)
+  \item Fitness: \texttt{gsm8k\_loglikelihood}, \texttt{num\_samples=120}, \texttt{batch\_size=12}
+\end{itemize}
+
+\textbf{Pipeline}
+\begin{itemize}
+  \item Baseline-Fitness
+  \item Pro Generation: \texttt{ask -> evaluate(population) -> tell}
+  \item Checkpointing und Logging pro Run
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Bisherige Beobachtungen und Learnings}
+\begin{itemize}
+  \item Binary-Fitness ist methodisch nah an Endmetrik, aber teuer und noisig.
+  \item LogLik-Fitness ist deutlich effizienter und liefert glattere Optimierungssignale.
+  \item Fitnessdefinition dominiert die reale Laufzeit im ES-Loop
+  \item Layer-selektive Optimierung ist praktikabel fuer kontrollierte Studien.
+\end{itemize}
+
+\vspace{0.4em}
+\textbf{Wissenschaftliche Konsequenz:}
+\begin{itemize}
+  \item Fuer faire Aussagekraft sind strikte A/B-Setups noetig (gleicher Seed, gleiches Eval-Budget).
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Threats to Validity}
+\begin{itemize}
+  \item Unterschiedliche Eval-Limits/Splits koennen Effekte verzerren.
+  \item Surrogate mismatch: Trainingsfitness (LogLik) vs Zielmetrik (Exact-Match).
+  \item Seed-Sensitivitaet bei stochastischer Populationsevaluation.
+  \item Moegliches Overfitting auf Teilmengen ohne sauberes Reshuffling-Protokoll.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Fazit und Ausblick}
+\textbf{Fazit}
+\begin{itemize}
+  \item ES ist ein valider Ansatz fuer gradient-freies LLM-Finetuning auf selektierten Layern.
+  \item Besonders starkes Argument bei nicht-differenzierbaren Zielgroessen (Binary Validator).
+  \item LogLik als Fitness ist ein effizienter, stabiler Surrogate fuer ES-Training.
+\end{itemize}
+
+\textbf{Ausblick}
+\begin{itemize}
+  \item Saubere Baseline-vs-ES Studien mit mehreren Seeds
+  \item Ablationen: Layerauswahl, Population, Sigma-Schedule
+  \item Transfer-Evaluierung auf weitere Reasoning-Tasks
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Backup: Reproduzierbarkeit}
+\textbf{Run-Artefakte}
+\begin{itemize}
+  \item \texttt{config.json}
+  \item \texttt{training\_log.jsonl}
+  \item \texttt{checkpoint\_genXXXX.pt}
+  \item \texttt{best\_layer\_weights.pt}
+  \item gespeichertes Modell unter \texttt{model/}
+\end{itemize}
+
+\textbf{Entry Points}
+\begin{itemize}
+  \item Training: \texttt{scripts/train\_es.py}
+  \item Evaluierung: \texttt{scripts/eval\_es\_model.py}, \texttt{scripts/eval\_olmes\_tasks.py}
+\end{itemize}
+\end{frame}
+
+\end{document}
