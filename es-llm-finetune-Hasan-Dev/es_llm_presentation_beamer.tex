@@ -468,6 +468,34 @@ def tell(self, current_params, candidates, fitnesses):
 \end{itemize}
 \end{frame}
 
+\begin{frame}{Log-Likelihood Algorithmus (Schritt fuer Schritt)}
+\textbf{Ziel:} Bewerte, wie wahrscheinlich das Modell die \emph{korrekte} Antwort findet.
+
+\vspace{0.4em}
+\textbf{Ablauf pro Beispiel}
+\begin{enumerate}
+  \item Erzeuge Prompt aus \texttt{system} + \texttt{user} Nachricht.
+  \item Haenge Gold-Antwort an: \texttt{full\_text = prompt + gold\_answer}.
+  \item Tokenisiere und merke \texttt{answer\_start} (Start der Antwort-Tokens).
+  \item Forward-Pass: \texttt{logits = model(input\_ids)}.
+  \item Wandle in Log-Wahrscheinlichkeiten um: \texttt{log\_softmax(logits)}.
+  \item Sammle nur die Gold-Token-LogProbs im Antwortbereich.
+  \item Mittelwert ueber Antwort-Tokens und dann ueber alle Samples.
+\end{enumerate}
+
+\vspace{0.4em}
+\textbf{Formel (vereinfacht)}
+\[
+\text{fitness} = \frac{1}{M} \sum_{j=1}^{M}
+\left(
+\frac{1}{T_j} \sum_{t=1}^{T_j}
+\log p_\theta\big(y_{j,t}^{\text{gold}} \mid x_j, y_{j,<t}^{\text{gold}}\big)
+\right)
+\]
+
+\textbf{Interpretation:} Hoeher (weniger negativ) bedeutet: Modell weist den korrekten Tokens mehr Wahrscheinlichkeit zu.
+\end{frame}
+
 \begin{frame}[fragile]{Code: Binary vs LogLik Fitnesspfad}
 \textbf{Binary (langsam, diskret):}
 \begin{lstlisting}[style=pycode]
