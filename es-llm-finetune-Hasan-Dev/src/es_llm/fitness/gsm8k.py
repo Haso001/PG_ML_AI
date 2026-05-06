@@ -85,6 +85,7 @@ class GSM8KFitness(BaseFitness):
         seed: int = 42,
         reshuffle: bool = False,
         pool_size: int | None = None,
+        batch_size: int = 1,
     ):
         self.num_samples = num_samples
         self.split = split
@@ -92,6 +93,7 @@ class GSM8KFitness(BaseFitness):
         self.seed = seed
         self.reshuffle = reshuffle
         self.pool_size = pool_size
+        self.batch_size = max(1, batch_size)
         self._dataset = None
         self._full_pool = None
         self._rng = random.Random(seed)
@@ -129,7 +131,7 @@ class GSM8KFitness(BaseFitness):
             logger.info("GSM8K fixed subset loaded: %d examples", len(self._dataset))
 
     def name(self) -> str:
-        return f"gsm8k_{self.split}_{self.num_samples}"
+        return f"gsm8k_{self.split}_{self.num_samples}_bs{self.batch_size}"
 
     @torch.inference_mode()
     def evaluate(self, model: nn.Module, tokenizer: PreTrainedTokenizerBase) -> float:
@@ -138,29 +140,40 @@ class GSM8KFitness(BaseFitness):
         model.eval()
         correct = 0
 
-        for ex in tqdm(self._dataset, desc="    GSM8K Eval", unit="q", leave=False):
-            question = ex["question"]
-            gold = normalize_answer(extract_hash_answer(ex["answer"]))
+        total = len(self._dataset)
+        for start in tqdm(
+            range(0, total, self.batch_size), desc="    GSM8K Eval", unit="batch", leave=False
+        ):
+            batch = self._dataset[start : start + self.batch_size]
 
-            messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": USER_TEMPLATE.format(q=question)},
-            ]
-            prompt = tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-            inputs = tokenizer([prompt], return_tensors="pt").to(model.device)
+            prompts = []
+            golds = []
+            for question, answer in zip(batch["question"], batch["answer"]):
+                messages = [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": USER_TEMPLATE.format(q=question)},
+                ]
+                prompts.append(
+                    tokenizer.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=True
+                    )
+                )
+                golds.append(normalize_answer(extract_hash_answer(answer)))
+
+            inputs = tokenizer(prompts, return_tensors="pt", padding=True).to(model.device)
+            input_lengths = inputs["attention_mask"].sum(dim=1)
             gen = model.generate(
                 **inputs,
                 max_new_tokens=self.max_new_tokens,
                 do_sample=False,
             )
-            out_ids = gen[0, inputs["input_ids"].shape[1] :]
-            pred_text = tokenizer.decode(out_ids, skip_special_tokens=True)
-            pred = normalize_answer(extract_hash_answer(pred_text))
 
-            if pred is not None and gold is not None and pred == gold:
-                correct += 1
+            for row, gold in enumerate(golds):
+                out_ids = gen[row, int(input_lengths[row].item()) :]
+                pred_text = tokenizer.decode(out_ids, skip_special_tokens=True)
+                pred = normalize_answer(extract_hash_answer(pred_text))
+                if pred is not None and gold is not None and pred == gold:
+                    correct += 1
 
         accuracy = correct / len(self._dataset) if len(self._dataset) > 0 else 0.0
         return accuracy
